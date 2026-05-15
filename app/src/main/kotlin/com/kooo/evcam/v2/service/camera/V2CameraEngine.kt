@@ -53,6 +53,18 @@ class V2CameraEngine(context: Context, listener: Listener? = null) {
         graph.detachPreviewSurface(index)
     }
 
+    fun attachSecondaryPreviewSurface(index: Int, surface: Surface, applyFisheye: Boolean = true, applyNativeTransform: Boolean = true, useBlindSpotFisheye: Boolean = false, rotation: Int = 0): Boolean {
+        return graph.attachSecondaryPreviewSurface(index, surface, applyFisheye, applyNativeTransform, useBlindSpotFisheye, rotation)
+    }
+
+    fun detachSecondaryPreviewSurface(index: Int): Boolean {
+        return graph.detachSecondaryPreviewSurface(index)
+    }
+
+    fun setSecondaryPreviewCorrection(index: Int, scaleX: Float, scaleY: Float, translateX: Float, translateY: Float, rotation: Float, mirrorH: Boolean, mirrorV: Boolean): Boolean {
+        return graph.setSecondaryPreviewCorrection(index, scaleX, scaleY, translateX, translateY, rotation, mirrorH, mirrorV)
+    }
+
     fun previewIndexForPosition(position: String): Int? = graph.previewIndexForPosition(position)
 
     fun previewDescription(index: Int): String = graph.previewDescription(index)

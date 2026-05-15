@@ -12,6 +12,8 @@ local.properties
 *.log
 captures/
 .trae/
+.claude/
+.cursor/
 tmp/
 *.mp4
 AGENTS.md

@@ -1,8 +1,13 @@
 package com.kooo.evcam.v2.ui.settings
 
+import android.app.AlertDialog
+import android.os.Handler
+import android.os.Looper
+import android.text.InputType
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
@@ -19,6 +24,8 @@ internal class V2BlindSpotCorrectionSettingsSection(
     private val cards: V2SettingsCardFactory,
 ) {
     private var previewSide: String? = null
+    private val previewHandler = Handler(Looper.getMainLooper())
+    private val previewDebounceToken = Any()
 
     fun create(visible: Boolean): View {
         val card = LinearLayout(activity).apply {
@@ -139,7 +146,7 @@ internal class V2BlindSpotCorrectionSettingsSection(
             current = next
             V2BlindSpotSettings.setCorrection(activity, side, next)
             if (previewSide == side) {
-                V2CameraServiceCommands.showBlindSpotPreview(activity, side)
+                schedulePreviewRefresh(side)
             }
         }
         container.addView(sliderRow(
@@ -215,6 +222,27 @@ internal class V2BlindSpotCorrectionSettingsSection(
                 override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
             })
         })
+        valueText.setOnClickListener {
+            val currentVal = min + (rangeMax - min) * seekBar.progress / 1000f
+            val input = EditText(activity).apply {
+                inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL or InputType.TYPE_NUMBER_FLAG_SIGNED
+                setText(formatParam(currentVal))
+                selectAll()
+            }
+            AlertDialog.Builder(activity)
+                .setTitle(label)
+                .setView(input)
+                .setPositiveButton("确定") { _, _ ->
+                    val v = input.text.toString().toFloatOrNull() ?: return@setPositiveButton
+                    val clamped = v.coerceIn(min, rangeMax)
+                    val formatted = formatParam(clamped).toFloat()
+                    seekBar.progress = (((formatted - min) / (rangeMax - min)) * 1000).toInt().coerceIn(0, 1000)
+                    valueText.text = "$label ${formatParam(formatted)}"
+                    onChanged(formatted)
+                }
+                .setNegativeButton("取消", null)
+                .show()
+        }
         row.addView(valueText, LinearLayout.LayoutParams(dp(104), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             rightMargin = dp(14)
         })
@@ -222,7 +250,18 @@ internal class V2BlindSpotCorrectionSettingsSection(
         return row
     }
 
+    private fun schedulePreviewRefresh(side: String) {
+        previewHandler.removeCallbacksAndMessages(previewDebounceToken)
+        previewHandler.postDelayed({
+            V2CameraServiceCommands.showBlindSpotPreview(activity, side)
+        }, previewDebounceToken, PREVIEW_DEBOUNCE_MS)
+    }
+
     private fun formatParam(value: Float): String = String.format(Locale.US, "%.2f", value)
 
     private fun dp(value: Int): Int = cards.dp(value)
+
+    private companion object {
+        private const val PREVIEW_DEBOUNCE_MS = 300L
+    }
 }

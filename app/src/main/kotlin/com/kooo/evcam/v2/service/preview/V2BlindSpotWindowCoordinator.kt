@@ -30,6 +30,9 @@ internal class V2BlindSpotWindowCoordinator(
     private val hideFisheyePreview: () -> Unit,
     private val hideUi: () -> Unit,
     private val showToast: (String) -> Unit,
+    private val showSecondaryOverlay: (String) -> Unit = {},
+    private val hideSecondaryOverlay: () -> Unit = {},
+    private val hideDelayMs: () -> Long = { OFF_HIDE_DEBOUNCE_MS },
 ) {
     private var cameraIndex = -1
     private var activeSide: String? = null
@@ -61,20 +64,22 @@ internal class V2BlindSpotWindowCoordinator(
 
         signalIsOff = true
         cancelPendingShowHide()
+        val delay = hideDelayMs()
         handler.postDelayed({
             if (signalIsOff && activeSide == side) {
                 hide()
-                V2AppLog.i(TAG, "blind spot signal off side=$side, hide after debounce")
+                V2AppLog.i(TAG, "blind spot signal off side=$side, hide after ${delay}ms")
             } else {
                 V2AppLog.i(TAG, "blind spot hide canceled: signal active again side=$side active=$activeSide")
             }
-        }, HIDE_TOKEN, OFF_HIDE_DEBOUNCE_MS)
+        }, HIDE_TOKEN, delay)
     }
 
     fun hide() {
         handler.removeCallbacksAndMessages(SHOW_TOKEN)
         val index = cameraIndex
         hideAllWindows()
+        hideSecondaryOverlay()
         cameraIndex = -1
         activeSide = null
         activeWindowMode = null
@@ -138,6 +143,7 @@ internal class V2BlindSpotWindowCoordinator(
         if (previousIndex == index && previousSide == side && previousMode == mode) {
             if (forceRefresh) {
                 showWindow(mode, side, index)
+                showSecondaryOverlay(side)
                 V2AppLog.i(TAG, "blind spot window refreshed mode=$mode side=$side index=$index")
             } else {
                 V2AppLog.i(TAG, "blind spot show skipped: already active mode=$mode side=$side index=$index")
@@ -165,11 +171,13 @@ internal class V2BlindSpotWindowCoordinator(
                     return@postDelayed
                 }
                 showWindow(mode, side, index)
+                showSecondaryOverlay(side)
                 if (previousIndex != index && isDisplayPowerOn()) restoreMainPreview(previousIndex)
                 V2AppLog.i(TAG, "blind spot window recreated mode=$mode side=$side ${previewDescription(index)}")
             }, SHOW_TOKEN, recreateDelayMs(previousIndex, index, previousMode, mode))
         } else {
             showWindow(mode, side, index)
+            showSecondaryOverlay(side)
         }
         V2AppLog.perf("V2BlindSpotPerf", "show", SystemClock.elapsedRealtime() - startedMs, "mode=$mode side=$side index=$index previous=$previousIndex")
     }

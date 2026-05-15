@@ -19,6 +19,7 @@ pub const WORKER_ERROR_THREAD_ATTACH: c.jlong = -10;
 pub const WORKER_ERROR_TICK_RENDER_DRAIN: c.jlong = -11;
 pub const MAX_NATIVE_WRITERS = 8;
 pub const MAX_NATIVE_CAMERAS = 4;
+pub const MAX_PREVIEW_TARGETS: usize = 2;
 pub const COMPOSITE_PREVIEW_FPS_HISTORY: usize = 256;
 pub const COMPOSITE_PREVIEW_FPS_WINDOW_MS: i64 = 1000;
 pub const COLOR_FORMAT_SURFACE: i32 = 0x7F000789;
@@ -135,6 +136,16 @@ pub const Quad = struct {
     tex: [8]c.GLfloat = [_]c.GLfloat{ 0, 0, 1, 0, 0, 1, 1, 1 },
 };
 
+pub const PreviewCorrection = struct {
+    scale_x: f32 = 1.0,
+    scale_y: f32 = 1.0,
+    translate_x: f32 = 0.0,
+    translate_y: f32 = 0.0,
+    rotation: f32 = 0.0,
+    mirror_h: bool = false,
+    mirror_v: bool = false,
+};
+
 pub const OverlayBatch = struct {
     verts: [2048]c.GLfloat = [_]c.GLfloat{0} ** 2048,
     len: usize = 0,
@@ -232,6 +243,9 @@ pub const RenderCommandKind = enum(u8) {
     detach_previews,
     attach_composite_preview,
     detach_composite_preview,
+    attach_secondary_preview,
+    detach_secondary_preview,
+    set_secondary_correction,
     update_watermark,
     clear_watermark,
 };
@@ -275,11 +289,14 @@ pub const RenderCommand = struct {
     kind: RenderCommandKind = .none,
     runtime: RenderRuntimeConfig = .{},
     index: c.jint = -1,
+    target: u8 = 0,
     indexes_mask: u8 = 0,
     window: ?*c.ANativeWindow = null,
     apply_fisheye: bool = true,
     apply_native_transform: bool = true,
     use_blind_spot_fisheye: bool = false,
+    rotation: i32 = 0,
+    correction: PreviewCorrection = PreviewCorrection{},
     watermark_pixels: ?*anyopaque = null,
     watermark_bytes: usize = 0,
     watermark_width: c.jint = 0,
@@ -311,23 +328,25 @@ pub const Pipe = struct {
     config: c.EGLConfig = null,
     pbuffer: c.EGLSurface = c.EGL_NO_SURFACE,
     current_surface: c.EGLSurface = c.EGL_NO_SURFACE,
-    preview_surface: [4]c.EGLSurface = [_]c.EGLSurface{ c.EGL_NO_SURFACE, c.EGL_NO_SURFACE, c.EGL_NO_SURFACE, c.EGL_NO_SURFACE },
+    preview_surface: [4][MAX_PREVIEW_TARGETS]c.EGLSurface = [_][MAX_PREVIEW_TARGETS]c.EGLSurface{[_]c.EGLSurface{c.EGL_NO_SURFACE} ** MAX_PREVIEW_TARGETS} ** 4,
     composite_preview_surface: c.EGLSurface = c.EGL_NO_SURFACE,
-    preview_apply_fisheye: [4]bool = [_]bool{true} ** 4,
-    preview_apply_native_transform: [4]bool = [_]bool{true} ** 4,
-    preview_use_blind_spot_fisheye: [4]bool = [_]bool{false} ** 4,
+    preview_apply_fisheye: [4][MAX_PREVIEW_TARGETS]bool = [_][MAX_PREVIEW_TARGETS]bool{[_]bool{true} ** MAX_PREVIEW_TARGETS} ** 4,
+    preview_apply_native_transform: [4][MAX_PREVIEW_TARGETS]bool = [_][MAX_PREVIEW_TARGETS]bool{[_]bool{true} ** MAX_PREVIEW_TARGETS} ** 4,
+    preview_use_blind_spot_fisheye: [4][MAX_PREVIEW_TARGETS]bool = [_][MAX_PREVIEW_TARGETS]bool{[_]bool{false} ** MAX_PREVIEW_TARGETS} ** 4,
     encoder_surface: c.EGLSurface = c.EGL_NO_SURFACE,
-    preview_window: [4]?*c.ANativeWindow = [_]?*c.ANativeWindow{ null, null, null, null },
+    preview_window: [4][MAX_PREVIEW_TARGETS]?*c.ANativeWindow = [_][MAX_PREVIEW_TARGETS]?*c.ANativeWindow{[_]?*c.ANativeWindow{null} ** MAX_PREVIEW_TARGETS} ** 4,
     composite_preview_window: ?*c.ANativeWindow = null,
     encoder_window: ?*c.ANativeWindow = null,
     encoder_generation: c.jlong = 0,
     input: [4]Input = [_]Input{ Input{}, Input{}, Input{}, Input{} },
     encoder_quad: [4]Quad = [_]Quad{ Quad{}, Quad{}, Quad{}, Quad{} },
-    preview_quad: [4]Quad = [_]Quad{ Quad{}, Quad{}, Quad{}, Quad{} },
-    preview_quad_width: [4]i32 = [_]i32{0} ** 4,
-    preview_quad_height: [4]i32 = [_]i32{0} ** 4,
-    preview_window_width: [4]i32 = [_]i32{0} ** 4,
-    preview_window_height: [4]i32 = [_]i32{0} ** 4,
+    preview_quad: [4][MAX_PREVIEW_TARGETS]Quad = [_][MAX_PREVIEW_TARGETS]Quad{[_]Quad{Quad{}} ** MAX_PREVIEW_TARGETS} ** 4,
+    preview_quad_width: [4][MAX_PREVIEW_TARGETS]i32 = [_][MAX_PREVIEW_TARGETS]i32{[_]i32{0} ** MAX_PREVIEW_TARGETS} ** 4,
+    preview_quad_height: [4][MAX_PREVIEW_TARGETS]i32 = [_][MAX_PREVIEW_TARGETS]i32{[_]i32{0} ** MAX_PREVIEW_TARGETS} ** 4,
+    preview_window_width: [4][MAX_PREVIEW_TARGETS]i32 = [_][MAX_PREVIEW_TARGETS]i32{[_]i32{0} ** MAX_PREVIEW_TARGETS} ** 4,
+    preview_window_height: [4][MAX_PREVIEW_TARGETS]i32 = [_][MAX_PREVIEW_TARGETS]i32{[_]i32{0} ** MAX_PREVIEW_TARGETS} ** 4,
+    preview_rotation: [4][MAX_PREVIEW_TARGETS]i32 = [_][MAX_PREVIEW_TARGETS]i32{[_]i32{0} ** MAX_PREVIEW_TARGETS} ** 4,
+    preview_correction: [4][MAX_PREVIEW_TARGETS]PreviewCorrection = [_][MAX_PREVIEW_TARGETS]PreviewCorrection{[_]PreviewCorrection{PreviewCorrection{}} ** MAX_PREVIEW_TARGETS} ** 4,
     composite_preview_width: i32 = 0,
     composite_preview_height: i32 = 0,
     config_version: i64 = 0,

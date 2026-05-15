@@ -1,11 +1,14 @@
 package com.kooo.evcam.v2.ui.settings
 
+import android.app.AlertDialog
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.SeekBar
+import android.widget.TextView
 import android.widget.Toast
 import androidx.core.content.ContextCompat
 import com.kooo.evcam.R
@@ -21,11 +24,13 @@ class V2SignalSettingsSection(
 ) {
     private val blindSpotFisheye = V2FisheyeSettingsSection(activity, cards)
     private val blindSpotCorrection = V2BlindSpotCorrectionSettingsSection(activity, cards)
+    private val secondaryDisplay = V2BlindSpotSecondaryDisplaySettingsSection(activity, cards)
 
     fun blindSpotCard(): View {
+        val hideSeconds = V2BlindSpotSettings.hideDelaySeconds(activity)
         val card = propIdSwitchCard(
             title = "转向补盲",
-            subtitle = "监听 VHAL 转向灯属性；左=${V2BlindSpotSettings.LEFT_VALUE} 右=${V2BlindSpotSettings.RIGHT_VALUE} 关=${V2BlindSpotSettings.OFF_VALUE}；归零稳定 ${V2BlindSpotSettings.HIDE_DELAY_MS / 1000} 秒后关闭补盲窗口",
+            subtitle = "监听 VHAL 转向灯属性；左=${V2BlindSpotSettings.LEFT_VALUE} 右=${V2BlindSpotSettings.RIGHT_VALUE} 关=${V2BlindSpotSettings.OFF_VALUE}；归零稳定 $hideSeconds 秒后关闭补盲窗口",
             propId = V2BlindSpotSettings.turnSignalPropId(activity),
             defaultPropId = V2BlindSpotSettings.DEFAULT_TURN_SIGNAL_PROP_ID,
             checked = V2BlindSpotSettings.isEnabled(activity),
@@ -39,8 +44,10 @@ class V2SignalSettingsSection(
         ) { enabled ->
             LinearLayout(activity).apply {
                 orientation = LinearLayout.VERTICAL
+                addView(hideDelayRow(enabled))
                 addView(blindSpotFisheye.createBlindSpot(enabled))
                 addView(blindSpotCorrection.create(enabled))
+                addView(secondaryDisplay.create(enabled))
             }
         }
         return card
@@ -124,6 +131,65 @@ class V2SignalSettingsSection(
         row.addView(controls)
         if (extraView != null) row.addView(extraView)
         return row
+    }
+
+    private fun hideDelayRow(visible: Boolean): View {
+        val container = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(12), 0, 0)
+            visibility = if (visible) View.VISIBLE else View.GONE
+        }
+        val current = V2BlindSpotSettings.hideDelaySeconds(activity)
+        val label = TextView(activity).apply {
+            text = "关闭延迟：${current} 秒"
+            textSize = 16f
+            setTextColor(ContextCompat.getColor(activity, R.color.text_primary))
+        }
+        container.addView(label)
+        val minDelay = V2BlindSpotSettings.MIN_HIDE_DELAY_SECONDS
+        val maxDelay = V2BlindSpotSettings.MAX_HIDE_DELAY_SECONDS
+        val slider = SeekBar(activity).apply {
+            max = maxDelay - minDelay
+            progress = current - minDelay
+            setPadding(0, dp(8), 0, dp(8))
+        }
+        cards.styleSlider(slider)
+        slider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
+                val seconds = progress + minDelay
+                label.text = "关闭延迟：${seconds} 秒"
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar) {
+                val seconds = seekBar.progress + minDelay
+                V2BlindSpotSettings.setHideDelaySeconds(activity, seconds)
+                V2CameraServiceCommands.notifySettingsChanged(activity, V2SettingsCategory.BLIND_SPOT)
+            }
+        })
+        label.setOnClickListener {
+            val input = EditText(activity).apply {
+                inputType = InputType.TYPE_CLASS_NUMBER
+                setText((slider.progress + minDelay).toString())
+                selectAll()
+            }
+            AlertDialog.Builder(activity)
+                .setTitle("关闭延迟（秒）")
+                .setView(input)
+                .setPositiveButton("确定") { _, _ ->
+                    val v = input.text.toString().toIntOrNull() ?: return@setPositiveButton
+                    val clamped = v.coerceIn(minDelay, maxDelay)
+                    slider.progress = clamped - minDelay
+                    label.text = "关闭延迟：${clamped} 秒"
+                    V2BlindSpotSettings.setHideDelaySeconds(activity, clamped)
+                    V2CameraServiceCommands.notifySettingsChanged(activity, V2SettingsCategory.BLIND_SPOT)
+                }
+                .setNegativeButton("取消", null)
+                .show()
+        }
+        container.addView(slider, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+        ))
+        return container
     }
 
     private fun dp(value: Int): Int = cards.dp(value)

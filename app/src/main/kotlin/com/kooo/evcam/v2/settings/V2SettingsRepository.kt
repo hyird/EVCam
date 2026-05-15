@@ -57,6 +57,17 @@ object V2SettingsRepository {
         turnSignalPropId = V2BlindSpotSettings.turnSignalPropId(context),
         correctionEnabled = V2BlindSpotSettings.isCorrectionEnabled(context),
         windowMode = V2BlindSpotSettings.windowMode(context),
+        hideDelayMs = V2BlindSpotSettings.hideDelaySeconds(context) * 1_000L,
+        secondaryDisplay = V2SettingsSnapshot.SecondaryDisplay(
+            enabled = V2BlindSpotSettings.isSecondaryDisplayEnabled(context),
+            displayId = V2BlindSpotSettings.secondaryDisplayId(context),
+            rotation = V2BlindSpotSettings.secondaryDisplayRotation(context),
+            x = V2BlindSpotSettings.secondaryDisplayX(context),
+            y = V2BlindSpotSettings.secondaryDisplayY(context),
+            width = V2BlindSpotSettings.secondaryDisplayWidth(context),
+            height = V2BlindSpotSettings.secondaryDisplayHeight(context),
+            showBorder = V2BlindSpotSettings.isSecondaryDisplayBorderEnabled(context),
+        ),
     )
 
     fun blindSpotOverlayConfig(

@@ -110,6 +110,9 @@ object GlesNative {
     external fun attachPreviewSurfaceWithMode(handle: Long, index: Int, surface: Surface, applyFisheye: Boolean, applyNativeTransform: Boolean, useBlindSpotFisheye: Boolean): Boolean
     external fun detachPreviewSurface(handle: Long, index: Int): Boolean
     external fun detachPreviewSurfaces(handle: Long, indexes: IntArray): Boolean
+    external fun attachSecondaryPreviewSurface(handle: Long, index: Int, surface: Surface, applyFisheye: Boolean, applyNativeTransform: Boolean, useBlindSpotFisheye: Boolean, rotation: Int): Boolean
+    external fun detachSecondaryPreviewSurface(handle: Long, index: Int): Boolean
+    external fun setSecondaryPreviewCorrection(handle: Long, index: Int, scaleX: Float, scaleY: Float, translateX: Float, translateY: Float, rotation: Float, mirrorH: Boolean, mirrorV: Boolean): Boolean
     external fun releaseCompositor(handle: Long)
     external fun getMetricsSnapshot(handle: Long): LongArray
     external fun getLastError(): String

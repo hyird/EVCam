@@ -14,6 +14,16 @@ object V2BlindSpotSettings {
     private const val KEY_OVERLAY_PREFIX = "overlay_"
     private const val KEY_CORRECTION_ENABLED = "blind_spot_correction_enabled"
     private const val KEY_WINDOW_MODE = "window_mode"
+    private const val KEY_WINDOW_ORIENTATION = "window_orientation"
+    private const val KEY_SECONDARY_DISPLAY_ENABLED = "secondary_display_enabled"
+    private const val KEY_SECONDARY_DISPLAY_ID = "secondary_display_id"
+    private const val KEY_SECONDARY_DISPLAY_ROTATION = "secondary_display_rotation"
+    private const val KEY_SECONDARY_DISPLAY_X = "secondary_display_x"
+    private const val KEY_SECONDARY_DISPLAY_Y = "secondary_display_y"
+    private const val KEY_SECONDARY_DISPLAY_WIDTH = "secondary_display_width"
+    private const val KEY_SECONDARY_DISPLAY_HEIGHT = "secondary_display_height"
+    private const val KEY_SECONDARY_DISPLAY_BORDER = "secondary_display_border"
+    private const val KEY_HIDE_DELAY_SECONDS = "hide_delay_seconds"
 
     const val DEFAULT_TURN_SIGNAL_PROP_ID = 557875254
     private const val LEGACY_DEFAULT_TURN_SIGNAL_PROP_ID = 289408008
@@ -24,6 +34,9 @@ object V2BlindSpotSettings {
     const val RIGHT_VALUE = 2
     const val OFF_VALUE = 0
     const val HIDE_DELAY_MS = 1_000L
+    const val DEFAULT_HIDE_DELAY_SECONDS = 1
+    const val MIN_HIDE_DELAY_SECONDS = 1
+    const val MAX_HIDE_DELAY_SECONDS = 20
     const val MIN_CORRECTION_SCALE = 0.05f
     const val MAX_CORRECTION_SCALE = 6.0f
     const val MIN_CORRECTION_TRANSLATE = -6.0f
@@ -166,6 +179,63 @@ object V2BlindSpotSettings {
         resetCorrection(context, "left")
         resetCorrection(context, "right")
         V2AppLog.i("V2BlindSpotSettings", "reset all correction params")
+    }
+
+    fun hideDelaySeconds(context: Context): Int =
+        prefs(context).getInt(KEY_HIDE_DELAY_SECONDS, DEFAULT_HIDE_DELAY_SECONDS)
+            .coerceIn(MIN_HIDE_DELAY_SECONDS, MAX_HIDE_DELAY_SECONDS)
+
+    fun setHideDelaySeconds(context: Context, seconds: Int) {
+        val clamped = seconds.coerceIn(MIN_HIDE_DELAY_SECONDS, MAX_HIDE_DELAY_SECONDS)
+        prefs(context).edit().putInt(KEY_HIDE_DELAY_SECONDS, clamped).apply()
+        V2AppLog.i("V2BlindSpotSettings", "hideDelaySeconds=$clamped")
+    }
+
+    fun isSecondaryDisplayEnabled(context: Context): Boolean = prefs(context).getBoolean(KEY_SECONDARY_DISPLAY_ENABLED, false)
+
+    fun setSecondaryDisplayEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_SECONDARY_DISPLAY_ENABLED, enabled).apply()
+        V2AppLog.i("V2BlindSpotSettings", "secondaryDisplayEnabled=$enabled")
+    }
+
+    fun secondaryDisplayId(context: Context): Int = prefs(context).getInt(KEY_SECONDARY_DISPLAY_ID, -1)
+
+    fun setSecondaryDisplayId(context: Context, id: Int) {
+        prefs(context).edit().putInt(KEY_SECONDARY_DISPLAY_ID, id).apply()
+        V2AppLog.i("V2BlindSpotSettings", "secondaryDisplayId=$id")
+    }
+
+    fun secondaryDisplayRotation(context: Context): Int = prefs(context).getInt(KEY_SECONDARY_DISPLAY_ROTATION, 0)
+
+    fun setSecondaryDisplayRotation(context: Context, rotation: Int) {
+        val normalized = ((rotation % 360) + 360) % 360
+        prefs(context).edit().putInt(KEY_SECONDARY_DISPLAY_ROTATION, normalized).apply()
+        V2AppLog.i("V2BlindSpotSettings", "secondaryDisplayRotation=$normalized")
+    }
+
+    fun secondaryDisplayX(context: Context): Int = prefs(context).getInt(KEY_SECONDARY_DISPLAY_X, 0)
+
+    fun secondaryDisplayY(context: Context): Int = prefs(context).getInt(KEY_SECONDARY_DISPLAY_Y, 0)
+
+    fun secondaryDisplayWidth(context: Context): Int = prefs(context).getInt(KEY_SECONDARY_DISPLAY_WIDTH, 400)
+
+    fun secondaryDisplayHeight(context: Context): Int = prefs(context).getInt(KEY_SECONDARY_DISPLAY_HEIGHT, 300)
+
+    fun setSecondaryDisplayBounds(context: Context, x: Int, y: Int, width: Int, height: Int) {
+        prefs(context).edit()
+            .putInt(KEY_SECONDARY_DISPLAY_X, x)
+            .putInt(KEY_SECONDARY_DISPLAY_Y, y)
+            .putInt(KEY_SECONDARY_DISPLAY_WIDTH, width)
+            .putInt(KEY_SECONDARY_DISPLAY_HEIGHT, height)
+            .apply()
+        V2AppLog.i("V2BlindSpotSettings", "secondaryDisplayBounds=$x,$y ${width}x$height")
+    }
+
+    fun isSecondaryDisplayBorderEnabled(context: Context): Boolean = prefs(context).getBoolean(KEY_SECONDARY_DISPLAY_BORDER, false)
+
+    fun setSecondaryDisplayBorderEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_SECONDARY_DISPLAY_BORDER, enabled).apply()
+        V2AppLog.i("V2BlindSpotSettings", "secondaryDisplayBorder=$enabled")
     }
 
     fun normalizeCorrectionRotation(rotation: Float): Float {

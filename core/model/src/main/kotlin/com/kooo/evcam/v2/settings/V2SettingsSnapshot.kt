@@ -64,6 +64,18 @@ data class V2SettingsSnapshot(
         val rightValue: Int = 2,
         val offValue: Int = 0,
         val hideDelayMs: Long = 1_000L,
+        val secondaryDisplay: SecondaryDisplay = SecondaryDisplay(),
+    )
+
+    data class SecondaryDisplay(
+        val enabled: Boolean = false,
+        val displayId: Int = -1,
+        val rotation: Int = 0,
+        val x: Int = 0,
+        val y: Int = 0,
+        val width: Int = 400,
+        val height: Int = 300,
+        val showBorder: Boolean = false,
     )
 
     data class BlindSpotOverlay(
