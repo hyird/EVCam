@@ -33,21 +33,13 @@ fn getArrayLen(env: [*c]c.JNIEnv, arr: anytype) c.jsize {
     return env.*[0].GetArrayLength.?(env, arr);
 }
 
-fn playbackCacheEntryNewerFirst(a: *const PlaybackCacheEntry, b: *const PlaybackCacheEntry) bool {
+fn playbackCacheEntryNewerFirst(_: void, a: PlaybackCacheEntry, b: PlaybackCacheEntry) bool {
     return std.mem.order(u8, std.mem.sliceTo(&a.name, 0), std.mem.sliceTo(&b.name, 0)) == .gt;
 }
 
 fn sortPlaybackCacheEntries(entries: []PlaybackCacheEntry) void {
     if (entries.len < 2) return;
-    var i: usize = 0;
-    while (i + 1 < entries.len) : (i += 1) {
-        var best = i;
-        var j = i + 1;
-        while (j < entries.len) : (j += 1) {
-            if (playbackCacheEntryNewerFirst(&entries[j], &entries[best])) best = j;
-        }
-        if (best != i) std.mem.swap(PlaybackCacheEntry, &entries[i], &entries[best]);
-    }
+    std.mem.sort(PlaybackCacheEntry, entries, {}, playbackCacheEntryNewerFirst);
 }
 
 fn ensureThumbnails(env: [*c]c.JNIEnv, result: *PlaybackCacheBuildResult) void {

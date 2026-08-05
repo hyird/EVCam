@@ -122,6 +122,12 @@ const DCT_COS = [_][8]f64{
     .{ 0.19509032201612833, -0.5555702330196022, 0.8314696123025455, -0.9807852804032307, 0.9807852804032304, -0.8314696123025451, 0.5555702330196015, -0.19509032201612866 },
 };
 
+// The JPEG path is kept portable at the Zig source level.  On the arm64
+// Android target these fixed-width vectors lower to Advanced SIMD, while
+// other targets still get a correct scalarized implementation from Zig.
+const Simd4 = @Vector(4, f64);
+const Simd8 = @Vector(8, f64);
+
 const Component = enum { y, cb, cr };
 
 const BufferedWriter = struct {
@@ -289,18 +295,23 @@ fn encodeBlock(
     while (y < 8) : (y += 1) {
         const src_y = @min(block_y + y, height - 1);
         var x: usize = 0;
-        while (x < 8) : (x += 1) {
-            const src_x = @min(block_x + x, width - 1);
-            const src = (src_y * width + src_x) * 3;
-            const r: f64 = @floatFromInt(rgb[src]);
-            const g: f64 = @floatFromInt(rgb[src + 1]);
-            const b: f64 = @floatFromInt(rgb[src + 2]);
-            const value = switch (component) {
-                .y => 0.299 * r + 0.587 * g + 0.114 * b,
-                .cb => 128.0 - 0.168736 * r - 0.331264 * g + 0.5 * b,
-                .cr => 128.0 + 0.5 * r - 0.418688 * g - 0.081312 * b,
+        while (x < 8) : (x += 4) {
+            var r: Simd4 = undefined;
+            var g: Simd4 = undefined;
+            var b: Simd4 = undefined;
+            inline for (0..4) |lane| {
+                const src_x = @min(block_x + x + lane, width - 1);
+                const src = (src_y * width + src_x) * 3;
+                r[lane] = @floatFromInt(rgb[src]);
+                g[lane] = @floatFromInt(rgb[src + 1]);
+                b[lane] = @floatFromInt(rgb[src + 2]);
+            }
+            const value: Simd4 = switch (component) {
+                .y => @as(Simd4, @splat(0.299)) * r + @as(Simd4, @splat(0.587)) * g + @as(Simd4, @splat(0.114)) * b,
+                .cb => @as(Simd4, @splat(128.0)) - @as(Simd4, @splat(0.168736)) * r - @as(Simd4, @splat(0.331264)) * g + @as(Simd4, @splat(0.5)) * b,
+                .cr => @as(Simd4, @splat(128.0)) + @as(Simd4, @splat(0.5)) * r - @as(Simd4, @splat(0.418688)) * g - @as(Simd4, @splat(0.081312)) * b,
             };
-            samples[y * 8 + x] = value - 128.0;
+            inline for (0..4) |lane| samples[y * 8 + x + lane] = value[lane] - 128.0;
         }
     }
 
@@ -343,10 +354,14 @@ fn fdctQuantize(samples: *const [64]f64, qtable: *const [64]u8, out: *[64]i32) v
             var sum: f64 = 0.0;
             var y: usize = 0;
             while (y < 8) : (y += 1) {
-                var x: usize = 0;
-                while (x < 8) : (x += 1) {
-                    sum += samples[y * 8 + x] * DCT_COS[u][x] * DCT_COS[v][y];
+                var sample_vec: Simd8 = undefined;
+                var cos_x: Simd8 = undefined;
+                inline for (0..8) |x| {
+                    sample_vec[x] = samples[y * 8 + x];
+                    cos_x[x] = DCT_COS[u][x];
                 }
+                const cos_y: Simd8 = @splat(DCT_COS[v][y]);
+                sum += @reduce(.Add, sample_vec * cos_x * cos_y);
             }
             const index = v * 8 + u;
             const scaled = 0.25 * DCT_C[u] * DCT_C[v] * sum;

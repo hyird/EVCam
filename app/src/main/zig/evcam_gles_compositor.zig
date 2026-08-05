@@ -637,13 +637,15 @@ fn clearCurrent(p: *Pipe) void {
 
 const VERT = "attribute vec4 aPosition;attribute vec2 aTexCoord;varying vec2 vTexCoord;void main(){gl_Position=aPosition;vTexCoord=aTexCoord;}";
 const FRAG = "#extension GL_OES_EGL_image_external : require\n" ++
-    "precision mediump float;varying vec2 vTexCoord;uniform samplerExternalOES uTexture;uniform int uFisheyeEnabled;uniform float uK1;uniform float uK2;uniform float uK3;uniform float uK4;uniform float uZoom;uniform vec2 uCenter;uniform vec4 uOpenCvIntrinsics;" ++
-    "void main(){ if(uFisheyeEnabled==0){gl_FragColor=texture2D(uTexture,vTexCoord);return;} vec4 intr=max(abs(uOpenCvIntrinsics),vec4(1.0)); vec2 delta=(vTexCoord-uCenter)/max(abs(uZoom),0.01); vec2 coord=vec2(delta.x*intr.z/intr.x,delta.y*intr.w/intr.y); float r2=dot(coord,coord); float r4=r2*r2; float r6=r4*r2; float r8=r4*r4; float distortion=1.0+uK1*r2+uK2*r4+uK3*r6+uK4*r8; vec2 distorted=coord*distortion; vec2 corrected=vec2(distorted.x*intr.x/intr.z,distorted.y*intr.y/intr.w)+uCenter; if(corrected.x<0.0||corrected.x>1.0||corrected.y<0.0||corrected.y>1.0){ gl_FragColor=vec4(0.0,0.0,0.0,1.0); }else{ gl_FragColor=texture2D(uTexture,corrected); }}";
+    "precision mediump float;varying vec2 vTexCoord;uniform samplerExternalOES uTexture;uniform int uFisheyeEnabled;uniform vec4 uDistortion;uniform vec4 uLens;uniform vec4 uOpenCvIntrinsics;" ++
+    "void main(){ if(uFisheyeEnabled==0){gl_FragColor=texture2D(uTexture,vTexCoord);return;} vec2 delta=(vTexCoord-uLens.yz)*uLens.x; vec2 coord=delta*uOpenCvIntrinsics.xy; float r2=dot(coord,coord); float distortion=1.0+r2*(uDistortion.x+r2*(uDistortion.y+r2*(uDistortion.z+r2*uDistortion.w))); vec2 distorted=coord*distortion; vec2 corrected=distorted*uOpenCvIntrinsics.zw+uLens.yz; if(corrected.x<0.0||corrected.x>1.0||corrected.y<0.0||corrected.y>1.0){ gl_FragColor=vec4(0.0,0.0,0.0,1.0); }else{ gl_FragColor=texture2D(uTexture,corrected); }}";
 const OVERLAY_VERT = "attribute vec2 aPosition;void main(){gl_Position=vec4(aPosition,0.0,1.0);}";
 const OVERLAY_FRAG = "precision mediump float;uniform vec4 uColor;void main(){gl_FragColor=uColor;}";
 const OVERLAY_TEXT_VERT = "attribute vec2 aPosition;attribute vec2 aTexCoord;varying vec2 vTexCoord;void main(){gl_Position=vec4(aPosition,0.0,1.0);vTexCoord=aTexCoord;}";
 const OVERLAY_TEXT_FRAG = "precision mediump float;varying vec2 vTexCoord;uniform sampler2D uTexture;uniform vec4 uColor;void main(){float a=texture2D(uTexture,vTexCoord).a;gl_FragColor=vec4(uColor.rgb,uColor.a*a);}";
 const TEXTURE_FRAG = "precision mediump float;varying vec2 vTexCoord;uniform sampler2D uTexture;void main(){gl_FragColor=texture2D(uTexture,vTexCoord);}";
+const TEXTURE_QUAD_POS = [_]c.GLfloat{ -1.0, 1.0, 1.0, 1.0, -1.0, -1.0, 1.0, -1.0 };
+const TEXTURE_QUAD_TEX = [_]c.GLfloat{ 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0 };
 
 fn compileShader(kind: c.GLenum, source: [*c]const u8) c.GLuint {
     const shader = c.glCreateShader(kind);
@@ -805,6 +807,34 @@ fn initOverlayFontTexture(p: *Pipe) bool {
     return true;
 }
 
+fn initTextureQuadBuffers(p: *Pipe) bool {
+    if (p.texture_pos_vbo != 0 and p.texture_tex_vbo != 0) return true;
+    if (p.texture_pos_vbo == 0) c.glGenBuffers(1, &p.texture_pos_vbo);
+    if (p.texture_tex_vbo == 0) c.glGenBuffers(1, &p.texture_tex_vbo);
+    if (p.texture_pos_vbo == 0 or p.texture_tex_vbo == 0) {
+        if (p.texture_pos_vbo != 0) c.glDeleteBuffers(1, &p.texture_pos_vbo);
+        if (p.texture_tex_vbo != 0) c.glDeleteBuffers(1, &p.texture_tex_vbo);
+        p.texture_pos_vbo = 0;
+        p.texture_tex_vbo = 0;
+        setErrorSlice("texture quad VBO allocation failed");
+        return false;
+    }
+    c.glBindBuffer(c.GL_ARRAY_BUFFER, p.texture_pos_vbo);
+    c.glBufferData(c.GL_ARRAY_BUFFER, @intCast(@sizeOf(@TypeOf(TEXTURE_QUAD_POS))), &TEXTURE_QUAD_POS, c.GL_STATIC_DRAW);
+    c.glBindBuffer(c.GL_ARRAY_BUFFER, p.texture_tex_vbo);
+    c.glBufferData(c.GL_ARRAY_BUFFER, @intCast(@sizeOf(@TypeOf(TEXTURE_QUAD_TEX))), &TEXTURE_QUAD_TEX, c.GL_STATIC_DRAW);
+    c.glBindBuffer(c.GL_ARRAY_BUFFER, 0);
+    if (glError("initTextureQuadBuffers")) |e| {
+        setErrorSlice(e);
+        c.glDeleteBuffers(1, &p.texture_pos_vbo);
+        c.glDeleteBuffers(1, &p.texture_tex_vbo);
+        p.texture_pos_vbo = 0;
+        p.texture_tex_vbo = 0;
+        return false;
+    }
+    return true;
+}
+
 fn initEgl(p: *Pipe) bool {
     if (p.display != c.EGL_NO_DISPLAY) return true;
     p.display = c.eglGetDisplay(c.EGL_DEFAULT_DISPLAY);
@@ -859,17 +889,20 @@ fn initEgl(p: *Pipe) bool {
     p.texture_tex_loc = c.glGetAttribLocation(p.texture_program, "aTexCoord");
     p.texture_sampler_loc = c.glGetUniformLocation(p.texture_program, "uTexture");
     p.fisheye_enabled_loc = c.glGetUniformLocation(p.program, "uFisheyeEnabled");
-    p.k1_loc = c.glGetUniformLocation(p.program, "uK1");
-    p.k2_loc = c.glGetUniformLocation(p.program, "uK2");
-    p.k3_loc = c.glGetUniformLocation(p.program, "uK3");
-    p.k4_loc = c.glGetUniformLocation(p.program, "uK4");
-    p.zoom_loc = c.glGetUniformLocation(p.program, "uZoom");
-    p.center_loc = c.glGetUniformLocation(p.program, "uCenter");
+    p.distortion_loc = c.glGetUniformLocation(p.program, "uDistortion");
+    p.lens_loc = c.glGetUniformLocation(p.program, "uLens");
     p.opencv_intrinsics_loc = c.glGetUniformLocation(p.program, "uOpenCvIntrinsics");
     if (p.program == 0 or p.pos_loc < 0 or p.tex_loc < 0 or p.sampler_loc < 0 or p.overlay_program == 0 or p.overlay_pos_loc < 0 or p.overlay_color_loc < 0 or p.overlay_text_program == 0 or p.overlay_text_pos_loc < 0 or p.overlay_text_tex_loc < 0 or p.overlay_text_sampler_loc < 0 or p.overlay_text_color_loc < 0 or p.texture_program == 0 or p.texture_pos_loc < 0 or p.texture_tex_loc < 0 or p.texture_sampler_loc < 0) {
         setError("GLES program locations unavailable", .{});
         return false;
     }
+    c.glUseProgram(p.program);
+    c.glUniform1i(p.sampler_loc, 0);
+    c.glUseProgram(0);
+    c.glUseProgram(p.texture_program);
+    c.glUniform1i(p.texture_sampler_loc, 0);
+    c.glUseProgram(0);
+    _ = initTextureQuadBuffers(p);
     _ = initOverlayFontTexture(p);
     clearCurrent(p);
     logd("EGL initialized", .{});
@@ -906,8 +939,19 @@ fn makeCurrent(p: *Pipe, surface: c.EGLSurface) bool {
     return true;
 }
 
-fn setPreviewSwapInterval(p: *Pipe) void {
-    _ = c.eglSwapInterval(p.display, 1);
+fn setPreviewSwapInterval(p: *Pipe, initialized: *bool) void {
+    if (initialized.*) return;
+    // The worker already paces preview frames.  A zero EGL interval avoids
+    // blocking the pipe lock on display vsync; SurfaceFlinger still handles
+    // composition pacing on the consumer side.
+    _ = c.eglSwapInterval(p.display, 0);
+    initialized.* = true;
+}
+
+fn setEncoderSwapInterval(p: *Pipe) void {
+    if (p.encoder_swap_interval_set) return;
+    _ = c.eglSwapInterval(p.display, 0);
+    p.encoder_swap_interval_set = true;
 }
 
 fn updateSurfaceTexture(st: ?*c.ASurfaceTexture) bool {
@@ -1122,7 +1166,6 @@ fn beginDrawPass(p: *Pipe) void {
     c.glEnableVertexAttribArray(@intCast(p.pos_loc));
     c.glEnableVertexAttribArray(@intCast(p.tex_loc));
     c.glActiveTexture(c.GL_TEXTURE0);
-    c.glUniform1i(p.sampler_loc, 0);
 }
 
 fn drawQuadWithFisheye(p: *Pipe, index: usize, q: *const Quad, apply_fisheye: bool, use_blind_spot_fisheye: bool) void {
@@ -1147,13 +1190,14 @@ fn drawQuadWithFisheye(p: *Pipe, index: usize, q: *const Quad, apply_fisheye: bo
         const fy = if (use_blind_spot_fisheye) p.blind_spot_fisheye_fy[index] else p.fisheye_fy[index];
         const source_width = if (use_blind_spot_fisheye) p.blind_spot_fisheye_source_width[index] else p.fisheye_source_width[index];
         const source_height = if (use_blind_spot_fisheye) p.blind_spot_fisheye_source_height[index] else p.fisheye_source_height[index];
-        if (p.k1_loc >= 0) c.glUniform1f(p.k1_loc, k1);
-        if (p.k2_loc >= 0) c.glUniform1f(p.k2_loc, k2);
-        if (p.k3_loc >= 0) c.glUniform1f(p.k3_loc, k3);
-        if (p.k4_loc >= 0) c.glUniform1f(p.k4_loc, k4);
-        if (p.zoom_loc >= 0) c.glUniform1f(p.zoom_loc, zoom);
-        if (p.center_loc >= 0) c.glUniform2f(p.center_loc, center_x, center_y);
-        if (p.opencv_intrinsics_loc >= 0) c.glUniform4f(p.opencv_intrinsics_loc, fx, fy, source_width, source_height);
+        const safe_zoom = @max(if (zoom < 0.0) -zoom else zoom, 0.01);
+        const safe_fx = @max(if (fx < 0.0) -fx else fx, 1.0);
+        const safe_fy = @max(if (fy < 0.0) -fy else fy, 1.0);
+        const safe_source_width = @max(if (source_width < 0.0) -source_width else source_width, 1.0);
+        const safe_source_height = @max(if (source_height < 0.0) -source_height else source_height, 1.0);
+        if (p.distortion_loc >= 0) c.glUniform4f(p.distortion_loc, k1, k2, k3, k4);
+        if (p.lens_loc >= 0) c.glUniform4f(p.lens_loc, 1.0 / safe_zoom, center_x, center_y, 0.0);
+        if (p.opencv_intrinsics_loc >= 0) c.glUniform4f(p.opencv_intrinsics_loc, safe_source_width / safe_fx, safe_source_height / safe_fy, safe_fx / safe_source_width, safe_fy / safe_source_height);
     }
     c.glDrawArrays(c.GL_TRIANGLE_STRIP, 0, 4);
 }
@@ -1269,7 +1313,6 @@ fn flushWatermarkTexture(p: *Pipe, x: f32, y: f32, w: f32, h: f32) void {
     c.glVertexAttribPointer(@intCast(p.texture_tex_loc), 2, c.GL_FLOAT, c.GL_FALSE, 0, &q.tex);
     c.glActiveTexture(c.GL_TEXTURE0);
     c.glBindTexture(c.GL_TEXTURE_2D, p.watermark_texture);
-    c.glUniform1i(p.texture_sampler_loc, 0);
     c.glDrawArrays(c.GL_TRIANGLE_STRIP, 0, 4);
     c.glDisableVertexAttribArray(@intCast(p.texture_tex_loc));
     c.glDisableVertexAttribArray(@intCast(p.texture_pos_loc));
@@ -1324,9 +1367,14 @@ fn releaseWatermarkTextureLocked(p: *Pipe) void {
 fn copyWatermarkRows(pixels: ?*anyopaque, width: usize, height: usize, stride: usize) ?*anyopaque {
     const row_bytes = width * 4;
     const bytes = row_bytes * height;
+    const src_ptr = pixels orelse return null;
     const raw = malloc(bytes) orelse return null;
-    const src: [*]const u8 = @ptrCast(pixels orelse return null);
+    const src: [*]const u8 = @ptrCast(src_ptr);
     const dst: [*]u8 = @ptrCast(raw);
+    if (stride == row_bytes) {
+        @memcpy(dst[0..bytes], src[0..bytes]);
+        return raw;
+    }
     for (0..height) |row| {
         @memcpy(dst[(row * row_bytes)..][0..row_bytes], src[(row * stride)..][0..row_bytes]);
     }
@@ -1460,7 +1508,8 @@ fn renderPreviewLocked(env: [*c]c.JNIEnv, p: *Pipe, index: i32) bool {
     // Latch input texture (once for all targets)
     const latch_surface = if (has_primary) p.preview_surface[i][0] else p.preview_surface[i][1];
     if (!makeCurrent(p, latch_surface)) return false;
-    setPreviewSwapInterval(p);
+    const latch_target: usize = if (has_primary) 0 else 1;
+    setPreviewSwapInterval(p, &p.preview_swap_interval_set[i][latch_target]);
     _ = env;
     if (!latchInputTextureLocked(&p.input[i])) {
         clearCurrent(p);
@@ -1491,15 +1540,21 @@ fn renderPreviewTargetLocked(p: *Pipe, i: usize, target: usize) bool {
     if (i >= 4 or target >= MAX_PREVIEW_TARGETS) return false;
     if (p.preview_surface[i][target] == c.EGL_NO_SURFACE) return true;
     if (!makeCurrent(p, p.preview_surface[i][target])) return false;
-    setPreviewSwapInterval(p);
+    setPreviewSwapInterval(p, &p.preview_swap_interval_set[i][target]);
     const refresh = @mod(p.input[i].preview_render_count, 120) == 0;
     const size = previewWindowSizeTargetLocked(p, i, target, refresh);
     const vw = size.width;
     const vh = size.height;
     if (p.preview_quad_width[i][target] != vw or p.preview_quad_height[i][target] != vh) updatePreviewLayoutTarget(p, @intCast(i), target, vw, vh);
     c.glViewport(0, 0, vw, vh);
-    c.glClearColor(0, 0, 0, 1);
-    c.glClear(c.GL_COLOR_BUFFER_BIT);
+    const input = &p.input[i];
+    const can_draw_input = input.texture != 0 and input.surface_texture_native != null and input.has_latched_frame;
+    const correction = p.preview_correction[i][target];
+    const correction_covers_surface = correction.scale_x == 1.0 and correction.scale_y == 1.0 and correction.rotation == 0.0 and correction.translate_x == 0.0 and correction.translate_y == 0.0;
+    if (!can_draw_input or !correction_covers_surface) {
+        c.glClearColor(0, 0, 0, 1);
+        c.glClear(c.GL_COLOR_BUFFER_BIT);
+    }
     beginDrawPass(p);
     drawQuadWithFisheye(p, i, &p.preview_quad[i][target], p.preview_apply_fisheye[i][target], p.preview_use_blind_spot_fisheye[i][target]);
     if (CHECK_RENDER_GL_ERROR) if (glError("renderPreviewTarget")) |e| {
@@ -1571,22 +1626,27 @@ fn drawCompositeSceneLocked(p: *Pipe, width: i32, height: i32, include_overlay: 
 }
 
 fn drawTexture2DToCurrentSurfaceLocked(p: *Pipe, texture: c.GLuint, width: i32, height: i32) void {
-    const verts = [_]c.GLfloat{ -1.0, 1.0, 1.0, 1.0, -1.0, -1.0, 1.0, -1.0 };
-    const tex = [_]c.GLfloat{ 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0 };
     c.glViewport(0, 0, width, height);
-    c.glClearColor(0, 0, 0, 1);
-    c.glClear(c.GL_COLOR_BUFFER_BIT);
     c.glUseProgram(p.texture_program);
     c.glEnableVertexAttribArray(@intCast(p.texture_pos_loc));
     c.glEnableVertexAttribArray(@intCast(p.texture_tex_loc));
-    c.glVertexAttribPointer(@intCast(p.texture_pos_loc), 2, c.GL_FLOAT, c.GL_FALSE, 0, &verts);
-    c.glVertexAttribPointer(@intCast(p.texture_tex_loc), 2, c.GL_FLOAT, c.GL_FALSE, 0, &tex);
+    if (p.texture_pos_vbo != 0 and p.texture_tex_vbo != 0) {
+        c.glBindBuffer(c.GL_ARRAY_BUFFER, p.texture_pos_vbo);
+        c.glVertexAttribPointer(@intCast(p.texture_pos_loc), 2, c.GL_FLOAT, c.GL_FALSE, 0, null);
+        c.glBindBuffer(c.GL_ARRAY_BUFFER, p.texture_tex_vbo);
+        c.glVertexAttribPointer(@intCast(p.texture_tex_loc), 2, c.GL_FLOAT, c.GL_FALSE, 0, null);
+    } else {
+        const verts = [_]c.GLfloat{ -1.0, 1.0, 1.0, 1.0, -1.0, -1.0, 1.0, -1.0 };
+        const tex = [_]c.GLfloat{ 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0 };
+        c.glVertexAttribPointer(@intCast(p.texture_pos_loc), 2, c.GL_FLOAT, c.GL_FALSE, 0, &verts);
+        c.glVertexAttribPointer(@intCast(p.texture_tex_loc), 2, c.GL_FLOAT, c.GL_FALSE, 0, &tex);
+    }
     c.glActiveTexture(c.GL_TEXTURE0);
     c.glBindTexture(c.GL_TEXTURE_2D, texture);
-    c.glUniform1i(p.texture_sampler_loc, 0);
     c.glDrawArrays(c.GL_TRIANGLE_STRIP, 0, 4);
     c.glDisableVertexAttribArray(@intCast(p.texture_tex_loc));
     c.glDisableVertexAttribArray(@intCast(p.texture_pos_loc));
+    if (p.texture_pos_vbo != 0 and p.texture_tex_vbo != 0) c.glBindBuffer(c.GL_ARRAY_BUFFER, 0);
 }
 
 fn resetCompositePreviewFpsLocked(p: *Pipe) void {
@@ -1669,7 +1729,9 @@ fn ensureRecordingFrameQueueLocked(p: *Pipe, width: i32, height: i32) bool {
         p.recording_frame_queue_height = height;
         p.recording_frame_queue_fbo_recreate_count += 1;
     }
+    var changed = false;
     for (&p.recording_frame_slots) |*slot| {
+        var slot_changed = false;
         if (slot.texture == 0) {
             c.glGenTextures(1, &slot.texture);
             if (slot.texture == 0) {
@@ -1682,6 +1744,7 @@ fn ensureRecordingFrameQueueLocked(p: *Pipe, width: i32, height: i32) bool {
             c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_WRAP_S, c.GL_CLAMP_TO_EDGE);
             c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_WRAP_T, c.GL_CLAMP_TO_EDGE);
             c.glTexImage2D(c.GL_TEXTURE_2D, 0, c.GL_RGBA, width, height, 0, c.GL_RGBA, c.GL_UNSIGNED_BYTE, null);
+            slot_changed = true;
         }
         if (slot.framebuffer == 0) {
             c.glGenFramebuffers(1, &slot.framebuffer);
@@ -1689,19 +1752,25 @@ fn ensureRecordingFrameQueueLocked(p: *Pipe, width: i32, height: i32) bool {
                 setErrorSlice("recording frame FBO allocation failed");
                 return false;
             }
+            slot_changed = true;
         }
-        c.glBindFramebuffer(c.GL_FRAMEBUFFER, slot.framebuffer);
-        c.glFramebufferTexture2D(c.GL_FRAMEBUFFER, c.GL_COLOR_ATTACHMENT0, c.GL_TEXTURE_2D, slot.texture, 0);
-        if (c.glCheckFramebufferStatus(c.GL_FRAMEBUFFER) != c.GL_FRAMEBUFFER_COMPLETE) {
-            c.glBindFramebuffer(c.GL_FRAMEBUFFER, 0);
-            setErrorSlice("recording frame FBO incomplete");
-            return false;
+        if (slot_changed) {
+            changed = true;
+            c.glBindFramebuffer(c.GL_FRAMEBUFFER, slot.framebuffer);
+            c.glFramebufferTexture2D(c.GL_FRAMEBUFFER, c.GL_COLOR_ATTACHMENT0, c.GL_TEXTURE_2D, slot.texture, 0);
+            if (c.glCheckFramebufferStatus(c.GL_FRAMEBUFFER) != c.GL_FRAMEBUFFER_COMPLETE) {
+                c.glBindFramebuffer(c.GL_FRAMEBUFFER, 0);
+                setErrorSlice("recording frame FBO incomplete");
+                return false;
+            }
         }
     }
-    c.glBindFramebuffer(c.GL_FRAMEBUFFER, 0);
-    if (glError("ensureRecordingFrameQueue")) |e| {
-        setErrorSlice(e);
-        return false;
+    if (changed) {
+        c.glBindFramebuffer(c.GL_FRAMEBUFFER, 0);
+        if (glError("ensureRecordingFrameQueue")) |e| {
+            setErrorSlice(e);
+            return false;
+        }
     }
     return true;
 }
@@ -1822,6 +1891,7 @@ fn renderQueuedRecordingFrameLocked(p: *Pipe) c.jlong {
     const start = nowMs();
     const frame_wall_clock_ms = slot.wall_clock_ms;
     if (!makeCurrent(p, p.encoder_surface)) return -1;
+    setEncoderSwapInterval(p);
     drawTexture2DToCurrentSurfaceLocked(p, slot.texture, p.width, p.height);
     drawOverlay(p);
     if (CHECK_RENDER_GL_ERROR) if (glError("renderQueuedRecordingFrame")) |e| {
@@ -1885,7 +1955,7 @@ fn renderCompositePreviewLocked(_: [*c]c.JNIEnv, p: *Pipe, update_inputs: bool) 
 
     if (!capture_for_recording) {
         if (!makeCurrent(p, p.composite_preview_surface)) return false;
-        setPreviewSwapInterval(p);
+        setPreviewSwapInterval(p, &p.composite_preview_swap_interval_set);
         if (update_inputs and !latchAllInputsLocked(p)) {
             clearCurrent(p);
             return false;
@@ -1933,7 +2003,7 @@ fn renderCompositePreviewLocked(_: [*c]c.JNIEnv, p: *Pipe, update_inputs: bool) 
     }
 
     if (!makeCurrent(p, p.composite_preview_surface)) return false;
-    setPreviewSwapInterval(p);
+    setPreviewSwapInterval(p, &p.composite_preview_swap_interval_set);
     if (composite_texture != 0) {
         drawTexture2DToCurrentSurfaceLocked(p, composite_texture, vw, vh);
     } else {
@@ -2025,6 +2095,7 @@ fn renderEncoderLocked(env: [*c]c.JNIEnv, p: *Pipe, require_dirty: bool, rendere
     }
     const start = nowMs();
     if (!makeCurrent(p, p.encoder_surface)) return false;
+    setEncoderSwapInterval(p);
     const update_start = nowMs();
     if (!updateDirtyInputsLocked(env, p)) {
         clearCurrent(p);
@@ -2799,6 +2870,40 @@ fn renderRecordingDueLocked(env: [*c]c.JNIEnv, p: *Pipe, steady_ms: i64) c.jlong
     if (!recordingFrameCaptureDueLocked(p, steady_ms)) return 0;
     const wall_clock_ms = wallClockMs();
     p.recording.requested_frames += 1;
+
+    // Without a composite preview there is no consumer for an intermediate
+    // full-size RGBA frame.  Render the scene directly into the encoder
+    // surface and avoid the FBO/texture write followed by a texture blit.
+    const has_composite_preview = p.composite_preview_surface != c.EGL_NO_SURFACE and p.composite_preview_window != null;
+    if (!has_composite_preview) {
+        // Release a queue left behind by a previously attached composite
+        // preview.  This is a one-time transition cost and prevents keeping
+        // two full-resolution RGBA textures alive during direct recording.
+        if (p.recording_frame_queue_width != 0 and p.recording_frame_queue_count == 0) {
+            if (makePbufferCurrent(p)) releaseRecordingFrameQueueLocked(p);
+        }
+        p.recording.overlay_wall_clock_ms = wall_clock_ms;
+        var rendered = false;
+        const ok = renderEncoderLocked(env, p, false, &rendered, null);
+        markRecordingFrameCaptureScheduledLocked(p, steady_ms);
+        if (!ok) return -1;
+        if (!rendered) {
+            p.recording.dropped_frames += 1;
+            p.recording.last_tick_steady_ms = nowMs();
+            return TICK_DROPPED;
+        }
+        p.recording.rendered_frames += 1;
+        const end = nowMs();
+        p.recording.last_tick_steady_ms = end;
+        var result: c.jlong = TICK_SHOULD_RENDER;
+        if (!p.recording.segment_switch_pending and p.recording.next_segment_wall_clock_ms > 0 and wall_clock_ms >= p.recording.next_segment_wall_clock_ms) {
+            const next_index = p.recording.segment_index + 1;
+            result |= TICK_SEGMENT_DUE;
+            result |= (@as(c.jlong, next_index) << TICK_NEXT_INDEX_SHIFT);
+        }
+        return result;
+    }
+
     if (!makePbufferCurrent(p)) return -1;
     if (!latchAllInputsLocked(p)) {
         c.glBindFramebuffer(c.GL_FRAMEBUFFER, 0);
@@ -3233,6 +3338,7 @@ fn attachEncoderWindowLocked(p: *Pipe, new_window: *c.ANativeWindow) c.jboolean 
     const old_window = p.encoder_window;
     p.encoder_surface = new_surface;
     p.encoder_window = new_window;
+    p.encoder_swap_interval_set = false;
     if (old_surface != c.EGL_NO_SURFACE) {
         if (p.current_surface == old_surface) clearCurrent(p);
         _ = c.eglDestroySurface(p.display, old_surface);
@@ -3268,6 +3374,7 @@ fn detachEncoderSurfaceLocked(p: *Pipe) void {
     p.encoder_generation = 0;
     p.encoder_frame_index = 0;
     p.encoder_pending = false;
+    p.encoder_swap_interval_set = false;
 }
 
 fn managedConfigFromRecording(p: *Pipe) ManagedSegmentConfig {
@@ -3755,6 +3862,7 @@ fn detachPreviewSurfaceTargetLocked(p: *Pipe, i: usize, target: usize) void {
     }
     p.preview_window_width[i][target] = 0;
     p.preview_window_height[i][target] = 0;
+    p.preview_swap_interval_set[i][target] = false;
     p.preview_use_blind_spot_fisheye[i][target] = false;
     p.preview_rotation[i][target] = 0;
     p.preview_correction[i][target] = PreviewCorrection{};
@@ -3799,6 +3907,7 @@ fn detachCompositePreviewSurfaceLocked(p: *Pipe) void {
         c.ANativeWindow_release(w);
         p.composite_preview_window = null;
     }
+    p.composite_preview_swap_interval_set = false;
     p.composite_preview_width = 0;
     p.composite_preview_height = 0;
     resetCompositePreviewFpsLocked(p);
@@ -4124,6 +4233,10 @@ export fn Java_com_kooo_evcam_v2_nativebridge_GlesNative_releaseCompositor(env: 
         p.encoder_surface = c.EGL_NO_SURFACE;
         if (p.overlay_font_texture != 0) c.glDeleteTextures(1, &p.overlay_font_texture);
         p.overlay_font_texture = 0;
+        if (p.texture_pos_vbo != 0) c.glDeleteBuffers(1, &p.texture_pos_vbo);
+        if (p.texture_tex_vbo != 0) c.glDeleteBuffers(1, &p.texture_tex_vbo);
+        p.texture_pos_vbo = 0;
+        p.texture_tex_vbo = 0;
         releaseWatermarkTextureLocked(p);
         if (p.program != 0) c.glDeleteProgram(p.program);
         p.program = 0;

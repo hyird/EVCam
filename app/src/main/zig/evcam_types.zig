@@ -157,7 +157,10 @@ pub const TexturedOverlayBatch = struct {
     len: usize = 0,
 };
 
-pub const RECORDING_FRAME_QUEUE_CAPACITY: usize = 3;
+// Two slots are enough to decouple the composite-preview render from the
+// encoder while avoiding an extra full-resolution RGBA frame of latency and
+// memory pressure.
+pub const RECORDING_FRAME_QUEUE_CAPACITY: usize = 2;
 
 pub const RecordingFrameSlot = struct {
     texture: c.GLuint = 0,
@@ -329,11 +332,14 @@ pub const Pipe = struct {
     pbuffer: c.EGLSurface = c.EGL_NO_SURFACE,
     current_surface: c.EGLSurface = c.EGL_NO_SURFACE,
     preview_surface: [4][MAX_PREVIEW_TARGETS]c.EGLSurface = [_][MAX_PREVIEW_TARGETS]c.EGLSurface{[_]c.EGLSurface{c.EGL_NO_SURFACE} ** MAX_PREVIEW_TARGETS} ** 4,
+    preview_swap_interval_set: [4][MAX_PREVIEW_TARGETS]bool = [_][MAX_PREVIEW_TARGETS]bool{[_]bool{false} ** MAX_PREVIEW_TARGETS} ** 4,
     composite_preview_surface: c.EGLSurface = c.EGL_NO_SURFACE,
+    composite_preview_swap_interval_set: bool = false,
     preview_apply_fisheye: [4][MAX_PREVIEW_TARGETS]bool = [_][MAX_PREVIEW_TARGETS]bool{[_]bool{true} ** MAX_PREVIEW_TARGETS} ** 4,
     preview_apply_native_transform: [4][MAX_PREVIEW_TARGETS]bool = [_][MAX_PREVIEW_TARGETS]bool{[_]bool{true} ** MAX_PREVIEW_TARGETS} ** 4,
     preview_use_blind_spot_fisheye: [4][MAX_PREVIEW_TARGETS]bool = [_][MAX_PREVIEW_TARGETS]bool{[_]bool{false} ** MAX_PREVIEW_TARGETS} ** 4,
     encoder_surface: c.EGLSurface = c.EGL_NO_SURFACE,
+    encoder_swap_interval_set: bool = false,
     preview_window: [4][MAX_PREVIEW_TARGETS]?*c.ANativeWindow = [_][MAX_PREVIEW_TARGETS]?*c.ANativeWindow{[_]?*c.ANativeWindow{null} ** MAX_PREVIEW_TARGETS} ** 4,
     composite_preview_window: ?*c.ANativeWindow = null,
     encoder_window: ?*c.ANativeWindow = null,
@@ -354,6 +360,8 @@ pub const Pipe = struct {
     overlay_program: c.GLuint = 0,
     overlay_text_program: c.GLuint = 0,
     overlay_font_texture: c.GLuint = 0,
+    texture_pos_vbo: c.GLuint = 0,
+    texture_tex_vbo: c.GLuint = 0,
     watermark_texture: c.GLuint = 0,
     watermark_width: i32 = 0,
     watermark_height: i32 = 0,
@@ -373,12 +381,8 @@ pub const Pipe = struct {
     texture_tex_loc: c.GLint = -1,
     texture_sampler_loc: c.GLint = -1,
     fisheye_enabled_loc: c.GLint = -1,
-    k1_loc: c.GLint = -1,
-    k2_loc: c.GLint = -1,
-    k3_loc: c.GLint = -1,
-    k4_loc: c.GLint = -1,
-    zoom_loc: c.GLint = -1,
-    center_loc: c.GLint = -1,
+    distortion_loc: c.GLint = -1,
+    lens_loc: c.GLint = -1,
     opencv_intrinsics_loc: c.GLint = -1,
     width: i32 = 1280,
     height: i32 = 720,
